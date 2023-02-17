@@ -1,0 +1,23 @@
+{
+  "name": "rina-chan-board",
+  "version": "1.0.0",
+  "description": "rina chan board nodemcu esp32 program with espruino",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "uglify": "uglifyjs ./build/min.js -c keep_fnames=true -m -o ./build/index.js",
+    "build": "webpack --config ./webpack.config.js --entry ./src/index.js -o ./build --output-filename min.js && npm run uglify",
+    "upload": "espruino -p COM4 -b 115200 ./build/index.js --storage .bootcde:./build/index.js",
+    "deploy": "npm run build && npm run upload",
+    "reset": "espruino -p COM4 -b 115200 -e 'reset(1);'"
+  },
+  "author": "Alfarell Muchamad Yuwanto",
+  "license": "ISC",
+  "dependencies": {
+    "uglify-js": "^3.17.4"
+  },
+  "devDependencies": {
+    "webpack": "^5.75.0",
+    "webpack-cli": "^5.0.1"
+  }
+}
