@@ -1,3 +1,4 @@
+const neopixel = require('neopixel')
 const { expresionPreset } = require('./data/faces')
 
 const LED_PIN = D4
@@ -7,69 +8,178 @@ const RINA_COLOR = [255, 20, 147]
 let rgb = new Uint8ClampedArray(LED_COUNT * 3) // Forces the values to be between 0 and 255
 let brightness = 0.2 // 0 to 1 based on how bright we want the colours to be.
 
-let active_eye = 0
-let active_blush = false
-let active_mouth = 0
+const switch1 = D16
+const switch2 = D17
+const switch3 = D18
+const switch4 = D19
 
-let prev_active_eye = null
-let prev_active_blush = null
-let prev_active_mouth = null
+let expression_mode = 0
+// expression mode list
+const expression_mode_list = ['eyes', 'blush', 'mouth']
 
-pinMode(D16, 'input_pulldown')
-pinMode(D17, 'input_pulldown')
-pinMode(D18, 'input_pulldown')
-pinMode(D19, 'input_pulldown')
+let active_mode = 0
+let active_key_expression = {
+  eyes: 0,
+  blush: false,
+  mouth: 0,
+}
+let prev_active_key_expression = {
+  eyes: null,
+  blush: null,
+  mouth: null,
+}
+const active_expression_indicator = {
+  eyes: 118,
+  blush: 50,
+  mouth: 9,
+}
+// mode list
+const mode_list = [
+  {
+    // change expression for each part (eyes, blush, mouth)
+    name: 'change-expression',
+    activeColor: [255, 0, 0],
+    actions: {
+      D17: () => {
+        const key = expression_mode_list[expression_mode]
+
+        prev_active_key_expression[key] = active_key_expression[key]
+        if (key === 'blush') {
+          if (active_key_expression[key] >= 1) {
+            active_key_expression[key] = typeof active_key_expression[key] === 'number' ? (active_key_expression[key] || expresionPreset[key].length) - 1 : expresionPreset[key].length
+          } else {
+            active_key_expression[key] = false
+          }
+        } else {
+          if (active_key_expression[key] >= 1) active_key_expression[key] = active_key_expression[key] - 1
+          else active_key_expression[key] = expresionPreset[key].length - 1
+        }
+
+        setLed()
+      },
+      D18: () => {
+        const key = expression_mode_list[expression_mode]
+
+        prev_active_key_expression[key] = active_key_expression[key]
+        if (key === 'blush') {
+          if (active_key_expression[key] >= expresionPreset.blush.length - 1) active_key_expression[key] = false
+          else active_key_expression[key] = typeof active_key_expression[key] === 'number' ? (active_key_expression[key] || 0) + 1 : 0
+        } else {
+          active_key_expression[key] = (active_key_expression[key] + 1) % expresionPreset[key].length
+        }
+
+        setLed()
+      },
+      D19: (e) => {
+        if (!e.state) {
+          if (e.time - e.lastTime < 2) {
+            expression_mode = (expression_mode + 1) % expression_mode_list.length
+          }
+          const key = expression_mode_list[expression_mode]
+          const active_indicator = active_expression_indicator[key]
+
+          setColor(active_indicator, [255, 0, 0])
+          draw()
+
+          setTimeout(() => {
+            setColor(active_indicator, [0, 0, 0])
+            draw()
+          }, 1000)
+        }
+      },
+    },
+  },
+  // {
+  //   // change expression face
+  //   name: 'change-face',
+  //   activeColor: [0, 255, 0],
+  // },
+  {
+    // change brightness
+    name: 'brightness',
+    activeColor: [255, 255, 0],
+    actions: {
+      D17: () => {
+        if (brightness <= 0.2) return
+        brightness = brightness - 0.1
+        setLed()
+      },
+      D18: () => {
+        if (brightness >= 0.9) return
+        brightness = brightness + 0.1
+        setLed()
+      },
+    },
+  },
+  {
+    // settings connectivity (BLE & Wifi)
+    name: 'connectivity',
+    activeColor: [0, 0, 255],
+  },
+]
+
+pinMode(switch1, 'input_pulldown')
+pinMode(switch2, 'input_pulldown')
+pinMode(switch3, 'input_pulldown')
+pinMode(switch4, 'input_pulldown')
 
 setWatch(
   function (e) {
-    if (e.time - e.lastTime < 0.2) return
+    if (e.state && e.time - e.lastTime < 0.2) return
 
-    if (brightness >= 1) brightness = 0.2
-    else brightness = brightness + 0.2
+    // handle code on low state button
+    if (!e.state) {
+      if (e.time - e.lastTime < 2) {
+        active_mode = (active_mode + 1) % mode_list.length
+      }
 
-    setLed()
+      setColor(0, mode_list[active_mode].activeColor)
+      draw()
+
+      setTimeout(() => {
+        setColor(0, [0, 0, 0])
+        draw()
+      }, 1000)
+    }
   },
-  D16,
-  { repeat: true, edge: 'rising', debounce: 50 }
+  switch1,
+  { repeat: true, edge: 'both', debounce: 50 }
 )
+
 setWatch(
   function (e) {
     if (e.time - e.lastTime < 0.2) return
 
-    prev_active_eye = active_eye
-    active_eye = (active_eye + 1) % expresionPreset.eyes.length
-
-    setLed()
+    runActiveAction(e)
   },
-  D17,
+  switch2,
   { repeat: true, edge: 'rising' }
 )
+
 setWatch(
   function (e) {
     if (e.time - e.lastTime < 0.2) return
 
-    prev_active_blush = active_blush
-    if (active_blush >= expresionPreset.blush.length - 1) active_blush = false
-    else active_blush = typeof active_blush === 'number' ? (active_blush || 0) + 1 : 0
-
-    setLed()
+    runActiveAction(e)
   },
-  D18,
+  switch3,
   { repeat: true, edge: 'rising' }
 )
+
 setWatch(
   function (e) {
-    console.log('change mouth', brightness, e.time - e.lastTime)
-    if (e.time - e.lastTime < 0.2) return
+    if (e.state && e.time - e.lastTime < 0.2) return
 
-    prev_active_mouth = active_mouth
-    active_mouth = (active_mouth + 1) % expresionPreset.mouth.length
-
-    setLed()
+    runActiveAction(e)
   },
-  D19,
-  { repeat: true, edge: 'rising' }
+  switch4,
+  { repeat: true, edge: 'both' }
 )
+
+function runActiveAction(e) {
+  const action = mode_list[active_mode] && mode_list[active_mode].actions && mode_list[active_mode].actions[e.pin]
+  action && action(e)
+}
 
 function setColor(index, color) {
   // colour is an array of 3 integers: RGB
@@ -79,23 +189,23 @@ function setColor(index, color) {
 }
 
 function draw() {
-  require('neopixel').write(LED_PIN, rgb)
+  neopixel.write(LED_PIN, rgb)
 }
 
 function setLed() {
   clearLed()
 
-  if (active_eye !== prev_active_eye) {
-    expresionPreset.eyes[active_eye].data.forEach((num) => setColor(num, RINA_COLOR))
+  if (active_key_expression.eyes !== prev_active_key_expression.eyes) {
+    expresionPreset.eyes[active_key_expression.eyes].data.forEach((num) => setColor(num, RINA_COLOR))
   }
-  if (active_mouth !== prev_active_mouth) {
-    expresionPreset.mouth[active_mouth].data.forEach((num) => setColor(num, RINA_COLOR))
+  if (active_key_expression.mouth !== prev_active_key_expression.mouth) {
+    expresionPreset.mouth[active_key_expression.mouth].data.forEach((num) => setColor(num, RINA_COLOR))
   }
-  if (active_blush !== prev_active_blush) {
-    if (typeof active_blush === 'number' && expresionPreset.eyes[active_eye].withBlush) {
-      expresionPreset.blush[active_blush].data.forEach((num) => setColor(num, RINA_COLOR))
+  if (active_key_expression.blush !== prev_active_key_expression.blush) {
+    if (typeof active_key_expression.blush === 'number' && expresionPreset.eyes[active_key_expression.eyes].withBlush) {
+      expresionPreset.blush[active_key_expression.blush].data.forEach((num) => setColor(num, RINA_COLOR))
     } else {
-      active_blush = false
+      active_key_expression.blush = false
     }
   }
 
